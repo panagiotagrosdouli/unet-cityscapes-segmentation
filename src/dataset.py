@@ -7,18 +7,61 @@ import torch
 from torch.utils.data import Dataset
 
 
-class CityscapesDataset(Dataset):
-    """Dataset loader for Cityscapes images and semantic masks.
+CITYSCAPES_ID_TO_TRAIN_ID = {
+    7: 0,    # road
+    8: 1,    # sidewalk
+    11: 2,   # building
+    12: 3,   # wall
+    13: 4,   # fence
+    17: 5,   # pole
+    19: 6,   # traffic light
+    20: 7,   # traffic sign
+    21: 8,   # vegetation
+    22: 9,   # terrain
+    23: 10,  # sky
+    24: 11,  # person
+    25: 12,  # rider
+    26: 13,  # car
+    27: 14,  # truck
+    28: 15,  # bus
+    31: 16,  # train
+    32: 17,  # motorcycle
+    33: 18,  # bicycle
+}
 
-    It expects the standard Cityscapes folder structure:
+CITYSCAPES_CLASSES = [
+    "road", "sidewalk", "building", "wall", "fence", "pole",
+    "traffic light", "traffic sign", "vegetation", "terrain", "sky",
+    "person", "rider", "car", "truck", "bus", "train", "motorcycle", "bicycle",
+]
+
+
+def convert_label_ids_to_train_ids(mask: np.ndarray, ignore_index: int = 255) -> np.ndarray:
+    """Convert official Cityscapes label IDs to 19 train IDs.
+
+    Cityscapes annotation files contain label IDs that are not contiguous.
+    CrossEntropyLoss requires class indices in [0, num_classes - 1], therefore
+    ignored/unlabeled pixels are assigned to ignore_index.
+    """
+    converted = np.full(mask.shape, ignore_index, dtype=np.uint8)
+    for label_id, train_id in CITYSCAPES_ID_TO_TRAIN_ID.items():
+        converted[mask == label_id] = train_id
+    return converted
+
+
+class CityscapesDataset(Dataset):
+    """Dataset loader for Cityscapes semantic segmentation.
+
+    Expected structure:
     data_root/leftImg8bit/split/city/*_leftImg8bit.png
     data_root/gtFine/split/city/*_gtFine_labelIds.png
     """
 
-    def __init__(self, data_root: str, split: str = "train", image_size: int = 256):
+    def __init__(self, data_root: str, split: str = "train", image_size: int = 256, ignore_index: int = 255):
         self.data_root = Path(data_root)
         self.split = split
         self.image_size = image_size
+        self.ignore_index = ignore_index
 
         image_dir = self.data_root / "leftImg8bit" / split
         self.image_paths = sorted(image_dir.glob("*/*_leftImg8bit.png"))
@@ -41,6 +84,8 @@ class CityscapesDataset(Dataset):
         mask_path = self._mask_path_from_image_path(image_path)
 
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
@@ -49,6 +94,7 @@ class CityscapesDataset(Dataset):
 
         image = cv2.resize(image, (self.image_size, self.image_size), interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
+        mask = convert_label_ids_to_train_ids(mask, ignore_index=self.ignore_index)
 
         image = image.astype(np.float32) / 255.0
         image = np.transpose(image, (2, 0, 1))
