@@ -1,6 +1,7 @@
 import argparse
 import random
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -21,6 +22,18 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def parse_class_weights(weights: Optional[str], num_classes: int, device: torch.device) -> Optional[torch.Tensor]:
+    """Parse a comma-separated list of class weights for CrossEntropyLoss."""
+    if not weights:
+        return None
+
+    values = [float(value.strip()) for value in weights.split(",") if value.strip()]
+    if len(values) != num_classes:
+        raise ValueError(f"Expected {num_classes} class weights, but received {len(values)}.")
+
+    return torch.tensor(values, dtype=torch.float32, device=device)
 
 
 def train(args):
@@ -59,7 +72,12 @@ def train(args):
     )
 
     model = UNet(in_channels=3, num_classes=args.num_classes).to(device)
-    criterion = CombinedSegmentationLoss(num_classes=args.num_classes, ignore_index=args.ignore_index)
+    class_weights = parse_class_weights(args.class_weights, args.num_classes, device)
+    criterion = CombinedSegmentationLoss(
+        num_classes=args.num_classes,
+        ignore_index=args.ignore_index,
+        class_weights=class_weights,
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
@@ -162,6 +180,12 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="outputs")
     parser.add_argument("--save-predictions", action="store_true")
     parser.add_argument("--augment", action="store_true", help="Enable random flip and brightness/contrast augmentation for training.")
+    parser.add_argument(
+        "--class-weights",
+        type=str,
+        default=None,
+        help="Optional comma-separated list of 19 class weights for CrossEntropyLoss.",
+    )
     args = parser.parse_args()
 
     train(args)
