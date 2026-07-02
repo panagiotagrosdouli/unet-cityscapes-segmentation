@@ -5,6 +5,7 @@ from typing import Optional
 
 import numpy as np
 import torch
+from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -39,7 +40,9 @@ def parse_class_weights(weights: Optional[str], num_classes: int, device: torch.
 def train(args):
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    amp_enabled = args.amp and device.type == "cuda"
     print(f"Using device: {device}")
+    print(f"AMP enabled: {amp_enabled}")
 
     train_dataset = CityscapesDataset(
         args.data_root,
@@ -80,6 +83,7 @@ def train(args):
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    scaler = GradScaler("cuda", enabled=amp_enabled)
 
     checkpoint_dir = Path(args.checkpoint_dir)
     output_dir = Path(args.output_dir)
@@ -98,10 +102,13 @@ def train(args):
             masks = masks.to(device)
 
             optimizer.zero_grad(set_to_none=True)
-            logits = model(images)
-            loss = criterion(logits, masks)
-            loss.backward()
-            optimizer.step()
+            with autocast("cuda", enabled=amp_enabled):
+                logits = model(images)
+                loss = criterion(logits, masks)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += loss.item()
             progress_bar.set_postfix(loss=f"{loss.item():.4f}")
@@ -119,7 +126,9 @@ def train(args):
                 images = images.to(device)
                 masks = masks.to(device)
 
-                logits = model(images)
+                with autocast("cuda", enabled=amp_enabled):
+                    logits = model(images)
+
                 val_accuracy += pixel_accuracy(logits, masks, ignore_index=args.ignore_index)
                 val_miou += mean_iou(logits, masks, num_classes=args.num_classes, ignore_index=args.ignore_index)
                 val_dice += dice_score(logits, masks, num_classes=args.num_classes, ignore_index=args.ignore_index)
@@ -152,6 +161,8 @@ def train(args):
             "epoch": epoch + 1,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "scaler_state_dict": scaler.state_dict(),
             "best_miou": best_miou,
             "args": vars(args),
         }
@@ -186,6 +197,7 @@ if __name__ == "__main__":
         default=None,
         help="Optional comma-separated list of 19 class weights for CrossEntropyLoss.",
     )
+    parser.add_argument("--amp", action="store_true", help="Enable automatic mixed precision training on CUDA.")
     args = parser.parse_args()
 
     train(args)
