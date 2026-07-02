@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,11 +36,21 @@ class DiceLoss(nn.Module):
 
 
 class CombinedSegmentationLoss(nn.Module):
-    """Combination of cross-entropy loss and Dice loss."""
+    """Combination of cross-entropy loss and Dice loss.
 
-    def __init__(self, num_classes: int = 19, dice_weight: float = 0.5, ignore_index: int = 255):
+    Optional class weights can be passed to CrossEntropyLoss to reduce the
+    dominance of frequent classes such as road, building, sky, and vegetation.
+    """
+
+    def __init__(
+        self,
+        num_classes: int = 19,
+        dice_weight: float = 0.5,
+        ignore_index: int = 255,
+        class_weights: Optional[torch.Tensor] = None,
+    ):
         super().__init__()
-        self.cross_entropy = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.cross_entropy = nn.CrossEntropyLoss(weight=class_weights, ignore_index=ignore_index)
         self.dice = DiceLoss(num_classes=num_classes, ignore_index=ignore_index)
         self.dice_weight = dice_weight
 
