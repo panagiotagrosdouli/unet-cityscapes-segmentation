@@ -28,8 +28,20 @@ def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    train_dataset = CityscapesDataset(args.data_root, split="train", image_size=args.image_size)
-    val_dataset = CityscapesDataset(args.data_root, split="val", image_size=args.image_size)
+    train_dataset = CityscapesDataset(
+        args.data_root,
+        split="train",
+        image_size=args.image_size,
+        ignore_index=args.ignore_index,
+        augment=args.augment,
+    )
+    val_dataset = CityscapesDataset(
+        args.data_root,
+        split="val",
+        image_size=args.image_size,
+        ignore_index=args.ignore_index,
+        augment=False,
+    )
 
     train_loader = DataLoader(
         train_dataset,
@@ -149,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")
     parser.add_argument("--output-dir", type=str, default="outputs")
     parser.add_argument("--save-predictions", action="store_true")
+    parser.add_argument("--augment", action="store_true", help="Enable random flip and brightness/contrast augmentation for training.")
     args = parser.parse_args()
 
     train(args)

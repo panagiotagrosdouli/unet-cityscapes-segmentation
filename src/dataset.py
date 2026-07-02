@@ -49,6 +49,24 @@ def convert_label_ids_to_train_ids(mask: np.ndarray, ignore_index: int = 255) ->
     return converted
 
 
+def apply_training_augmentation(image: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Apply lightweight augmentations suitable for semantic segmentation.
+
+    Geometric transforms are applied identically to the image and mask, while
+    photometric transforms are applied only to the image to preserve labels.
+    """
+    if np.random.rand() < 0.5:
+        image = np.ascontiguousarray(np.flip(image, axis=1))
+        mask = np.ascontiguousarray(np.flip(mask, axis=1))
+
+    if np.random.rand() < 0.5:
+        alpha = np.random.uniform(0.85, 1.15)  # contrast
+        beta = np.random.uniform(-15.0, 15.0)  # brightness
+        image = np.clip(alpha * image.astype(np.float32) + beta, 0, 255).astype(np.uint8)
+
+    return image, mask
+
+
 class CityscapesDataset(Dataset):
     """Dataset loader for Cityscapes semantic segmentation.
 
@@ -57,11 +75,19 @@ class CityscapesDataset(Dataset):
     data_root/gtFine/split/city/*_gtFine_labelIds.png
     """
 
-    def __init__(self, data_root: str, split: str = "train", image_size: int = 256, ignore_index: int = 255):
+    def __init__(
+        self,
+        data_root: str,
+        split: str = "train",
+        image_size: int = 256,
+        ignore_index: int = 255,
+        augment: bool = False,
+    ):
         self.data_root = Path(data_root)
         self.split = split
         self.image_size = image_size
         self.ignore_index = ignore_index
+        self.augment = augment
 
         image_dir = self.data_root / "leftImg8bit" / split
         self.image_paths = sorted(image_dir.glob("*/*_leftImg8bit.png"))
@@ -91,6 +117,9 @@ class CityscapesDataset(Dataset):
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         if mask is None:
             raise FileNotFoundError(f"Mask not found: {mask_path}")
+
+        if self.augment:
+            image, mask = apply_training_augmentation(image, mask)
 
         image = cv2.resize(image, (self.image_size, self.image_size), interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, (self.image_size, self.image_size), interpolation=cv2.INTER_NEAREST)
